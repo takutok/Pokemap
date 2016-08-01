@@ -39,6 +39,8 @@ public class PokemonNotificationService extends Service{
     private static final int notificationId = 2423235;
     private static final String ACTION_STOP_SELF = "com.omkarmoghe.pokemap.STOP_SERVICE";
 
+    public static boolean isRunning = false;
+
     private UpdateRunnable updateRunnable;
     private Thread workThread;
     private LocationManager locationManager;
@@ -66,13 +68,14 @@ public class PokemonNotificationService extends Service{
         locationManager = LocationManager.getInstance(this);
         nianticManager = NianticManager.getInstance();
 
-        updateRunnable = new UpdateRunnable(preffs.getServiceRefreshRate());
+        updateRunnable = new UpdateRunnable(preffs.getServiceRefreshRate() * 1000);
         workThread = new Thread(updateRunnable);
 
         initBroadcastReciever();
         workThread.start();
         locationManager.onResume();
 
+        isRunning = true;
     }
 
     /**
@@ -90,6 +93,7 @@ public class PokemonNotificationService extends Service{
         updateRunnable.stop();
         EventBus.getDefault().unregister(this);
         unregisterReceiver(mBroadcastReciever);
+        isRunning = false;
     }
 
     @Override
@@ -110,13 +114,19 @@ public class PokemonNotificationService extends Service{
 
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
 
-        //builder.setContentIntent(pi);
+        builder.setContentIntent(pi);
 
         Intent stopService = new Intent();
         stopService.setAction(ACTION_STOP_SELF);
 
         PendingIntent piStopService = PendingIntent.getBroadcast(this,0,stopService,0);
-        builder.addAction(R.drawable.ic_cancel_black_24px, getString(R.string.notification_service_stop), piStopService);
+        builder.addAction(R.drawable.ic_cancel_white_24px, getString(R.string.notification_service_stop), piStopService);
+
+        Intent pokemonGoIntent = getPackageManager().getLaunchIntentForPackage("com.nianticlabs.pokemongo");
+        if (pokemonGoIntent != null) { // make sure we will be able to launch Pokémon GO
+            PendingIntent pokemonGoPendingIntent = PendingIntent.getActivity(this, 1, pokemonGoIntent, 0);
+            builder.addAction(R.drawable.ic_pokeball, getString(R.string.notification_service_launch_pokemon_go), pokemonGoPendingIntent);
+        }
 
         nm.notify(notificationId,builder.build());
     }
@@ -175,22 +185,30 @@ public class PokemonNotificationService extends Service{
 
         @Override
         public void run() {
-            while(isRunning){
-                try{
-                    LatLng currentLocation = locationManager.getLocation();
 
-                    if(currentLocation != null){
-                        nianticManager.getCatchablePokemon(currentLocation.latitude,currentLocation.longitude,0);
-                    }else {
-                        locationManager = LocationManager.getInstance(PokemonNotificationService.this);
-                    }
+                try {
+
+                    // initial wait (fFor a reason! Do NOT remove because of cyclic sleep!)
                     Thread.sleep(refreshRate);
 
+                    while (isRunning) {
+
+                        LatLng currentLocation = locationManager.getLocation();
+
+                        if (currentLocation != null){
+                            nianticManager.getCatchablePokemon(currentLocation.latitude,currentLocation.longitude,0);
+                        } else {
+                            locationManager = LocationManager.getInstance(PokemonNotificationService.this);
+                        }
+
+                        // cyclic sleep
+                        Thread.sleep(refreshRate);
+
+                    }
                 } catch (InterruptedException | NullPointerException e) {
                     e.printStackTrace();
                     Log.e(TAG, "Failed updating. UpdateRunnable.run() raised: " + e.getMessage());
                 }
-            }
         }
 
         public void stop(){
@@ -205,4 +223,8 @@ public class PokemonNotificationService extends Service{
             locationManager.onPause();
         }
     };
+
+    public static boolean isRunning() {
+        return isRunning;
+    }
 }
